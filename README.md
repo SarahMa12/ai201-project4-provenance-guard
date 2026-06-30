@@ -50,18 +50,18 @@ Provenance Guard is a Flask API that analyzes text submissions and assesses whet
 ## Detection Signals
 
 ### Signal One: LLM-Based Semantic Evaluation (Groq/Llama-3.3)
-* **What it measures:** This signal uses the `llama-3.3-70b-versatile` model as an evaluator that assesses writing for stylistic characteristics commonly associated with AI-generated text. Rather than making a simple binary decision, it estimates how strongly the writing exhibits AI-like patterns across two tiers of indicators:
+* **What it measures:** This signal uses the `llama-3.3-70b-versatile` model to judge whether a piece of writing sounds like it was written by AI. Instead of making a simple yes/no decision, it assigns a confidence score based on two groups of writing patterns.
     * **Obvious indicators:**
-        * **Structural Homogeneity:** Repetitive organizational patterns and generic transition phrases (e.g., "Furthermore," "In conclusion").
-        * **Tone Mimicry:** Formulaic rhetorical templates often produced by language models, such as "But here's the thing..." or "The result?".
-        * **Buzzword Saturation:** Frequent use of generic AI-associated vocabulary (e.g., delve, pivotal, unlock, and empower) without strong contextual necessity.
+        * **Structural Homogeneity:** Repetitive organization and common transition phrases like "Furthermore" or "In conclusion."
+        * **Tone Mimicry:** Formulaic expressions often produced by AI, such as "But here's the thing..." or "The result?"
+        * **Buzzword Saturation:** Overuse of words like delve, pivotal, unlock, and empower when they aren't necessary.
     * **Subtle indicators (added after testing):** During testing, borderline samples — such as structured formal writing and conversational-sounding AI text — were initially under-scored because the prompt only caught obvious AI tells. The prompt was expanded to also detect:
-        * **Balanced Neutrality:** Methodically presenting both sides of an argument without a clear personal stance, a common AI pattern when generating "balanced" content.
-        * **Artificial Personal Voice:** Conversational openers like "I've been thinking about..." that perform human writing rather than expressing it genuinely.
-        * **Impersonal Precision:** Formal writing with no personal hedging, anecdotes, or lived details — reads like a summary rather than experience.
-        * **Even Paragraph Cadence:** Each paragraph cleanly covers exactly one point with no tangents or unresolved thoughts.
-* **Output Format:** A continuous confidence score (`float`) between 0.0 (Likely Human) and 1.0 (Likely AI).
-* **Blind Spots:** This signal is less reliable for hybrid writing, where humans substantially edit AI-generated text by adding personal experiences, informal tangents, or unique stylistic elements that disrupt typical AI writing patterns.
+        * **Balanced Neutrality:** Carefully presenting both sides of an argument without expressing a clear opinion.
+        * **Artificial Personal Voice:** Phrases like "I've been thinking about..." that imitate a personal voice without feeling genuine.
+        * **Impersonal Precision:** Writing that is polished and factual but lacks personal experiences, uncertainty, or lived details.
+        * **Even Paragraph Cadence:** Paragraphs that are all similarly structured, with each covering one clean idea and little natural variation.
+* **Output Format:** A confidence score from 0.0 (likely human-written) to 1.0 (likely AI-written).
+* **Blind Spots:** This signal is less accurate when a person heavily edits AI-generated text by adding their own experiences, personality, or writing style, making the text sound more naturally human.
 
 ### Signal Two: Stylometric Heuristics
 * **What it measures:** This signal analyzes quantifiable characteristics of the writing style that often differ between human and AI-generated text, including:

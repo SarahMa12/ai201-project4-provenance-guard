@@ -1,4 +1,6 @@
 import os
+import re
+import math
 import json
 import uuid
 from datetime import datetime, timezone
@@ -17,10 +19,17 @@ AUDIT_LOG_PATH = "audit_log.jsonl"
 _LLM_SYSTEM_PROMPT = """You are a writing analysis expert. Evaluate whether the text provided was likely written by an AI language model or a human.
 
 Assess it for these AI-writing indicators:
+
+Obvious indicators:
 - Structural Homogeneity: repetitive organizational patterns, generic transitions (e.g., "Furthermore,", "In conclusion,")
 - Tone Mimicry: formulaic rhetorical templates (e.g., "But here's the thing...", "The result?")
-- Punctuation Infatuation: overuse of em dashes (—) or other punctuation for artificial emphasis
-- Buzzword Saturation: heavy use of AI-associated vocabulary (e.g., delve, pivotal, unlock, empower, seamlessly) without strong contextual necessity
+- Buzzword Saturation: heavy use of AI-associated vocabulary (e.g., delve, pivotal, unlock, empower, seamlessly) without contextual necessity
+
+Subtle indicators:
+- Balanced neutrality: methodically presenting "on one hand / on the other hand" without a clear personal stance or conviction
+- Artificial personal voice: conversational openers ("I've been thinking about...", "Let's explore...") that feel like a performance of human writing rather than genuine expression
+- Impersonal precision: formal or academic writing with no personal hedging, anecdotes, or specific lived details — reads like a summary rather than experience
+- Even paragraph cadence: each paragraph cleanly covers exactly one point with no tangents, interruptions, or unresolved thoughts
 
 Respond with a single JSON object and nothing else:
 {"score": <float between 0.0 and 1.0>}
@@ -42,6 +51,42 @@ def get_llm_signal(text: str) -> float:
     result = json.loads(response.choices[0].message.content)
     score = float(result["score"])
     return max(0.0, min(1.0, score))
+
+
+def get_stylometric_signal(text: str) -> float:
+    """Compute stylometric AI-likelihood from sentence variance, TTR, and punctuation density."""
+
+    # Sentence Length Variance — higher burstiness = more human = lower AI score
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    if len(sentences) >= 2:
+        lengths = [len(s.split()) for s in sentences]
+        mean_len = sum(lengths) / len(lengths)
+        std_len = math.sqrt(sum((l - mean_len) ** 2 for l in lengths) / len(lengths))
+        cv = std_len / mean_len if mean_len > 0 else 0.0
+        variance_score = 1.0 / (1.0 + cv)
+    else:
+        variance_score = 0.5
+
+    # Type-Token Ratio — higher vocabulary diversity = more human = lower AI score
+    words = re.findall(r'\b\w+\b', text.lower())
+    if len(words) >= 5:
+        ttr = len(set(words)) / len(words)
+        ttr_score = 1.0 - ttr
+    else:
+        ttr_score = 0.5
+
+    # Punctuation Density — more expressive punctuation = more human = lower AI score
+    expressive_count = sum(text.count(c) for c in ';()!')
+    density = expressive_count / max(1, len(text))
+    punct_score = max(0.0, 1.0 - min(density * 30, 1.0))
+
+    stylometric_score = (variance_score + ttr_score + punct_score) / 3.0
+    return round(max(0.0, min(1.0, stylometric_score)), 4)
+
+
+def calculate_confidence(llm_score: float, stylometric_score: float) -> float:
+    """Combine signals: 70% semantic (LLM) + 30% stylometric."""
+    return round((0.7 * llm_score) + (0.3 * stylometric_score), 4)
 
 
 def get_transparency_label(score: float) -> tuple[str, str]:
@@ -98,9 +143,8 @@ def submit():
     timestamp = datetime.now(timezone.utc).isoformat()
 
     llm_score = get_llm_signal(text)
-
-    # TODO (Milestone 4): replace with calculate_confidence(llm_score, get_stylometric_signal(text))
-    confidence_score = round(llm_score, 4)
+    stylometric_score = get_stylometric_signal(text)
+    confidence_score = calculate_confidence(llm_score, stylometric_score)
 
     attribution_result, transparency_label = get_transparency_label(confidence_score)
 
@@ -108,9 +152,10 @@ def submit():
         "content_id": content_id,
         "creator_id": creator_id,
         "timestamp": timestamp,
-        "attribution": attribution_result,
-        "confidence": confidence_score,
         "llm_score": llm_score,
+        "stylometric_score": stylometric_score,
+        "confidence_score": confidence_score,
+        "attribution": attribution_result,
         "status": "classified",
     })
 

@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -13,6 +15,13 @@ load_dotenv()
 
 app = Flask(__name__)
 groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://",
+)
 
 AUDIT_LOG_PATH = "audit_log.jsonl"
 
@@ -96,7 +105,7 @@ def get_transparency_label(score: float) -> tuple[str, str]:
             "likely_human",
             "Our analysis found writing characteristics commonly associated with human authors, such as greater stylistic variation and vocabulary diversity. The system found little evidence suggesting AI-generated text, resulting in a high-confidence human classification.",
         )
-    elif score <= 0.65:
+    elif score <= 0.72:
         return (
             "uncertain",
             "The available evidence is mixed, and the system cannot confidently determine whether the content is human- or AI-generated. Some detected patterns are associated with AI-generated writing, while others are consistent with human writing. If you believe this classification is incorrect, you may submit an appeal for manual review.",
@@ -127,7 +136,40 @@ def log():
     return jsonify({"entries": get_log()}), 200
 
 
+@app.route("/appeal", methods=["POST"])
+def appeal():
+    data = request.get_json(silent=True)
+    if not data or "content_id" not in data or "appeal_reason" not in data:
+        return jsonify({"error": "Request body must include 'content_id' and 'appeal_reason'."}), 400
+
+    content_id = data["content_id"]
+    appeal_reason = data["appeal_reason"].strip()
+
+    if not appeal_reason:
+        return jsonify({"error": "'appeal_reason' must not be empty."}), 400
+
+    # verify the content_id exists in the audit log
+    entries = get_log()
+    known_ids = {e["content_id"] for e in entries}
+    if content_id not in known_ids:
+        return jsonify({"error": f"content_id '{content_id}' not found."}), 404
+
+    log_to_audit({
+        "content_id": content_id,
+        "appeal_reason": appeal_reason,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": "under_review",
+    })
+
+    return jsonify({
+        "message": "Your appeal has been received. This submission has been placed in the manual review queue.",
+        "content_id": content_id,
+        "status": "under_review",
+    }), 200
+
+
 @app.route("/submit", methods=["POST"])
+@limiter.limit("10 per minute; 100 per day")
 def submit():
     data = request.get_json(silent=True)
     if not data or "text" not in data or "creator_id" not in data:
